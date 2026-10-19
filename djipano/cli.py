@@ -37,6 +37,8 @@ def main(argv=None):
                     help="seam sharpness; higher = narrower transition / less ghosting (default: 3)")
     ap.add_argument("--no-seam", action="store_true",
                     help="disable seam-based assignment (smooth blending only)")
+    ap.add_argument("--no-refine", action="store_true",
+                    help="disable pose refinement (faster, less accurate seams)")
     ap.add_argument("--out-dir", "--out", dest="out_dir", default=".",
                     help="output folder for batch mode (default: current)")
     ap.add_argument("--no-color", action="store_true", help="disable colored output")
@@ -89,7 +91,8 @@ def main(argv=None):
                            preview=args.preview, fill=not args.no_fill,
                            exposure=args.exposure, blend=args.blend,
                            weight_power=args.sharpness, ui=ui,
-                           seam=not args.no_seam)
+                           seam=not args.no_seam,
+                           refine=not args.no_refine)
         except KeyboardInterrupt:
             ui.error("Interrupted.")
             return 130

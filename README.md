@@ -29,6 +29,8 @@ the native GUI and the command-line tool — so there is only one place to chang
 * Native **Tkinter GUI** with folder picker, live progress bar, ETA, log and
   panorama / tiny-planet preview.
 * Accurate stitching from XMP gimbal angles (no feature matching).
+* **Pose refinement** — per-frame rotation corrections estimated from the
+  overlaps, so the horizon and seams line up.
 * Standard 2:1 equirectangular output + GPano XMP + GPS/EXIF.
 * **Multiband (Laplacian pyramid) blending** — smooth seams, sharp detail.
 * **Seam-based assignment** — each pixel comes from one frame, which removes
@@ -46,6 +48,7 @@ the native GUI and the command-line tool — so there is only one place to chang
 * Python 3.9+
 * `numpy`
 * `Pillow`
+* `scipy` (pose refinement)
 * Tkinter **only for the GUI** (on macOS/Homebrew: `brew install python-tk@3.14`;
   Debian/Ubuntu: `sudo apt install python3-tk`; Windows: official python.org
   installer already includes it)
@@ -89,6 +92,7 @@ python3 dji_pano.py PANORAMA --out-dir output -w 12000 --preview
 | `--blend {multiband,linear}` | blending mode | `multiband` |
 | `--sharpness N` | seam sharpness (higher = narrower) | `3` |
 | `--no-seam` | disable seam-based assignment | off |
+| `--no-refine` | disable pose refinement | off |
 | `--out-dir DIR` | output folder for batch mode | `.` |
 | `--no-color` | disable coloured output | off |
 | `-q, --quiet` | only print errors | off |
@@ -98,13 +102,16 @@ python3 dji_pano.py PANORAMA --out-dir output -w 12000 --preview
 1. Read `GimbalYaw/Pitch/Roll` (XMP) and focal length (EXIF) from each frame.
    Compute intrinsics `fx, fy` from the camera sensor size.
 2. Build a camera-to-world rotation matrix (ENU) per frame.
-3. Fill the equirect map by inverse mapping: for each sphere pixel find the ray
+3. **Refine** the per-frame rotations by matching overlapping frames on the
+   sphere (robust bundle adjustment) — this removes the residual ~0.5° gimbal
+   error that makes horizons crooked.
+4. Fill the equirect map by inverse mapping: for each sphere pixel find the ray
    direction, transform it into the frame and bilinearly sample.
-4. Find a seam assignment (which frame owns each pixel) and blend with
+5. Find a seam assignment (which frame owns each pixel) and blend with
    multiband Laplacian pyramids: fine detail from one frame, smooth low
    frequencies across the seam.
-5. Fill uncovered areas (zenith) by colour diffusion.
-6. Save a 2:1 JPEG with GPano XMP and source GPS/EXIF.
+6. Fill uncovered areas (zenith) by colour diffusion.
+7. Save a 2:1 JPEG with GPano XMP and source GPS/EXIF.
 
 ### Project structure
 
@@ -177,6 +184,8 @@ DJI сохраняет панораму как набор отдельных к�
 * Нативный **GUI на Tkinter**: выбор папки, прогресс-бар, ETA, лог и превью
   панорамы / «маленькой планеты».
 * Точная сборка по углам подвеса из XMP (без feature matching).
+* **Уточнение позы** — поправки поворота каждого кадра по перекрытиям, чтобы
+  горизонт и швы сходились ровно.
 * Стандартный выход 2:1 equirectangular + XMP GPano + GPS/EXIF.
 * **Многополосное (Laplacian pyramid) смешивание** — гладкие швы и резкие детали.
 * **Шовное назначение пикселей** — каждый пиксель берётся из одного кадра,
@@ -194,6 +203,7 @@ DJI сохраняет панораму как набор отдельных к�
 * Python 3.9+
 * `numpy`
 * `Pillow`
+* `scipy` (уточнение позы)
 * Tkinter **только для GUI** (macOS/Homebrew: `brew install python-tk@3.14`;
   Debian/Ubuntu: `sudo apt install python3-tk`; Windows: официальный установщик
   python.org уже содержит Tk)
@@ -236,6 +246,7 @@ python3 dji_pano.py PANORAMA --out-dir output -w 12000 --preview
 | `--blend {multiband,linear}` | режим смешивания | `multiband` |
 | `--sharpness N` | резкость шва | `3` |
 | `--no-seam` | отключить шовное назначение | выкл. |
+| `--no-refine` | отключить уточнение позы | выкл. |
 | `--out-dir DIR` | папка результатов | `.` |
 | `--no-color` | отключить цветной вывод | выкл. |
 | `-q, --quiet` | только ошибки | выкл. |
@@ -245,12 +256,15 @@ python3 dji_pano.py PANORAMA --out-dir output -w 12000 --preview
 1. Из каждого кадра читаются `GimbalYaw/Pitch/Roll` (XMP) и фокусное
    расстояние (EXIF). По размеру сенсора вычисляются `fx, fy`.
 2. Для каждого кадра строится матрица поворота «камера → мир» (ENU).
-3. Выходная equirect-карта заполняется обратным отображением.
-4. Строится карта «владения» пикселей (какой кадр главный) и выполняется
+3. **Уточнение позы**: повороты кадров корректируются по совпадениям на сфере
+   (робастный bundle adjustment) — это убирает остаточную ошибку подвеса ~0.5°,
+   из-за которой горизонт выглядит криво на стыках.
+4. Выходная equirect-карта заполняется обратным отображением.
+5. Строится карта «владения» пикселей (какой кадр главный) и выполняется
    многополосное смешивание: мелкие детали из одного кадра, низкие частоты
    плавно смешиваются через шов.
-5. Непокрытые области (зенит) заполняются диффузией цвета.
-6. Результат сохраняется как 2:1 JPEG с XMP GPano и GPS/EXIF.
+6. Непокрытые области (зенит) заполняются диффузией цвета.
+7. Результат сохраняется как 2:1 JPEG с XMP GPano и GPS/EXIF.
 
 ### Структура проекта
 

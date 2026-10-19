@@ -12,6 +12,7 @@ from .metadata import (Camera, read_xmp_gimbal, build_gpano_xmp,
 from .geometry import rotation_matrix, _sample_bilinear
 from .blending import (estimate_gains, _render_linear, _render_multiband,
                        _compute_assignment, fill_holes)
+from .align import refine_poses
 from .progress import UI, _ProgressBar
 
 
@@ -46,7 +47,7 @@ def tiny_planet(equirect, size=1600, heading=0.0):
 def build_panorama(paths, out_width, out_height=None, output=None,
                    preview=False, fill=True, progress=True, exposure="none",
                    blend="multiband", weight_power=3.0, offsets=None,
-                   progress_cb=None, ui=None, seam=True):
+                   progress_cb=None, ui=None, seam=True, refine=True):
     out_height = out_height or out_width // 2
     ui = ui or UI(enabled=False)
 
@@ -60,6 +61,10 @@ def build_panorama(paths, out_width, out_height=None, output=None,
         roll = roll or 0.0
         cams.append(cam)
         rotations.append(rotation_matrix(yaw, pitch, roll))
+
+    if refine and len(paths) > 2:
+        with ui.spinner("Refining alignment"):
+            rotations = refine_poses(paths, cams, rotations)
 
     with ui.spinner("Reading exposure"):
         gains = estimate_gains(paths, cams, rotations, mode=exposure)

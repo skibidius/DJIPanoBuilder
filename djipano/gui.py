@@ -211,9 +211,11 @@ class App(tk.Tk):
         self.preview_var = tk.BooleanVar(value=True)
         self.fill_var = tk.BooleanVar(value=True)
         self.seam_var = tk.BooleanVar(value=True)
+        self.refine_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(checks, text="Tiny planet", variable=self.preview_var).pack(side="left")
         ttk.Checkbutton(checks, text="Fill zenith", variable=self.fill_var).pack(side="left", padx=12)
         ttk.Checkbutton(checks, text="Seam-based", variable=self.seam_var).pack(side="left")
+        ttk.Checkbutton(checks, text="Refine alignment", variable=self.refine_var).pack(side="left", padx=(12, 0))
 
         # output
         out = ttk.LabelFrame(left, text=" Output ", padding=10)
@@ -325,6 +327,7 @@ class App(tk.Tk):
         self.preview_var.set(True)
         self.fill_var.set(True)
         self.seam_var.set(True)
+        self.refine_var.set(True)
         self.out_var.set("output")
 
     # ---------------------------------------------------------------- build
@@ -346,6 +349,7 @@ class App(tk.Tk):
             "preview": bool(self.preview_var.get()),
             "fill": bool(self.fill_var.get()),
             "seam": bool(self.seam_var.get()),
+            "refine": bool(self.refine_var.get()),
             "blend": self.blend_var.get(),
             "sharpness": float(self.sharpen_var.get()),
             "exposure": self.exposure_var.get(),
@@ -395,7 +399,7 @@ class App(tk.Tk):
                     preview=opts["preview"], fill=opts["fill"],
                     exposure=opts["exposure"], blend=opts["blend"],
                     weight_power=opts["sharpness"], progress_cb=progress,
-                    ui=ui, seam=opts["seam"])
+                    ui=ui, seam=opts["seam"], refine=opts["refine"])
 
                 completed += max(1, len(paths))
 
