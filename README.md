@@ -124,9 +124,10 @@ dji_pano_gui.py     GUI entry point
 ### Automated build (GitHub Actions)
 
 `.github/workflows/build.yml` checks imports on Linux/macOS/Windows and builds
-standalone executables with PyInstaller (`dji-pano-builder` and
-`dji-pano-builder-gui`). On a `v*` tag the binaries are attached to the GitHub
-release automatically.
+standalone executables with PyInstaller. Every push to `main` updates the
+**[Latest build](https://github.com/skibidius/DJIPanoBuilder/releases/tag/latest)**
+pre-release with `dji-pano-builder-*` binaries for Linux, macOS and Windows;
+pushing a `v*` tag creates a versioned release.
 
 ### About the DJI Sphere format
 
@@ -269,9 +270,11 @@ dji_pano_gui.py     точка входа GUI
 ### Автоматическая сборка (GitHub Actions)
 
 `.github/workflows/build.yml` проверяет импорты на Linux/macOS/Windows и
-собирает standalone-бинарники через PyInstaller (`dji-pano-builder` и
-`dji-pano-builder-gui`). При пуше тега `v*` бинарники автоматически
-прикрепляются к GitHub Release.
+собирает standalone-бинарники через PyInstaller. Каждый пуш в `main`
+обновляет pre-release
+**[Latest build](https://github.com/skibidius/DJIPanoBuilder/releases/tag/latest)**
+с файлами `dji-pano-builder-*` для Linux, macOS и Windows; пуш тега `v*`
+создаёт версионированный релиз.
 
 ### Про формат DJI Sphere
 
