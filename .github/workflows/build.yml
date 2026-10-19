@@ -37,6 +37,13 @@ jobs:
         run: python dji_pano.py --help
       - name: GUI import
         run: python -c "import djipano.gui; print('GUI import OK')"
+      - name: Library API
+        run: |
+          python -c "import djipano; print('djipano', djipano.__version__)"
+          python -c "from djipano import stitch, StitchResult; print('api OK')"
+          python -c "import djipano.align; print('align OK')"
+      - name: Build wheel
+        run: python -m pip wheel . --no-deps -w wheelhouse
 
   build:
     name: Package executables (${{ matrix.os }})
@@ -58,9 +65,17 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt pyinstaller
       - name: Build CLI
-        run: pyinstaller --noconfirm --clean --onefile --name dji-pano-builder dji_pano.py
+        run: >-
+          pyinstaller --noconfirm --clean --onefile
+          --hidden-import scipy.optimize --hidden-import scipy.ndimage
+          --hidden-import scipy.signal
+          --name dji-pano-builder dji_pano.py
       - name: Build GUI
-        run: pyinstaller --noconfirm --clean --onefile --windowed --name dji-pano-builder-gui dji_pano_gui.py
+        run: >-
+          pyinstaller --noconfirm --clean --onefile --windowed
+          --hidden-import scipy.optimize --hidden-import scipy.ndimage
+          --hidden-import scipy.signal
+          --name dji-pano-builder-gui dji_pano_gui.py
       - name: Collect release files with unique names
         shell: bash
         run: |

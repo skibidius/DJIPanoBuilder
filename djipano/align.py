@@ -10,11 +10,13 @@ equirectangular domain** (where matching is stable) and solves for a small
 """
 
 import math
+import os
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
-from PIL import Image
 
 from .geometry import warp_to_equirect
+from .metadata import load_image
 
 
 def _rodrigues(w):
@@ -32,8 +34,8 @@ def _rodrigues(w):
 
 
 def _warp_gray(path, cam, R, W, H):
-    im = np.asarray(Image.open(path).convert("L"), dtype=np.float32)
-    w, wt = warp_to_equirect(im[:, :, None].repeat(3, 2), cam, R, W, H)
+    im, cam_i = load_image(path, cam, W, "L", min_width=2700)
+    w, wt = warp_to_equirect(im[:, :, None].repeat(3, 2), cam_i, R, W, H)
     out = np.zeros((H, W), dtype=np.float32)
     m = wt > 1e-4
     out[m] = w[..., 0][m] / wt[m]
@@ -41,14 +43,20 @@ def _warp_gray(path, cam, R, W, H):
 
 
 def _best_shift(a, b, ms):
+    from scipy.ndimage import uniform_filter
+    from scipy.signal import fftconvolve
     a = a - a.mean()
     b = b - b.mean()
     am2 = float((a * a).sum())
     if am2 < 1e-6:
         return 0, 0, -1.0
-    from scipy.signal import fftconvolve
     corr = fftconvolve(b, a[::-1, ::-1], mode="valid")
-    b2 = fftconvolve(b * b, np.ones(a.shape), mode="valid")
+    # Local energy via a separable box filter (≈5x faster than a second FFT).
+    u = uniform_filter(b * b, size=a.shape, mode="constant")
+    ph, pw = a.shape[0] // 2, a.shape[1] // 2
+    bh, bw = b.shape
+    b2 = u[ph:ph + (bh - a.shape[0] + 1),
+           pw:pw + (bw - a.shape[1] + 1)] * a.size
     ncc = corr / np.sqrt(np.maximum(am2 * b2, 1e-9))
     idx = np.unravel_index(np.argmax(ncc), ncc.shape)
     return idx[1] - ms, idx[0] - ms, float(ncc[idx])
@@ -69,35 +77,43 @@ def _measure(paths, cams, rotations, W, H, search=32, block=64):
     except Exception:  # pragma: no cover
         return None
 
-    warped = []
-    for i, p in enumerate(paths):
-        img, mask = _warp_gray(p, cams[i], rotations[i], W, H)
-        warped.append((gaussian_filter(img, 1.2), mask))
+    n = len(paths)
+    workers = min(8, os.cpu_count() or 4)
+
+    def _one(i):
+        img, mask = _warp_gray(paths[i], cams[i], rotations[i], W, H)
+        return gaussian_filter(img, 1.2), mask
+
+    # Warping + decoding is the expensive part and releases the GIL, so
+    # threads scale well here (≈2x on Apple Silicon).
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        warped = list(ex.map(_one, range(n)))
 
     # cheap overlap detection on downsampled masks
     small = [m[::10, ::10] for _, m in warped]
-    n = len(paths)
     pairs = []
     for i in range(n):
         for j in range(i + 1, n):
             if (small[i] & small[j]).sum() > 120:
                 pairs.append((i, j))
 
-    matches = []
     step = block // 2
-    for i, j in pairs:
+
+    def _pair(pair):
+        i, j = pair
         A, mA = warped[i]
         B, mB = warped[j]
         ov = mA & mB
         ys, xs = np.where(ov)
         if len(xs) == 0:
-            continue
+            return ()
         # Expand the bbox by one block so blocks lying *on* a thin overlap
         # band are considered too (coverage check filters the rest).
         x0 = max(search, int(xs.min()) - block)
         x1 = min(W - search, int(xs.max()) + block)
         y0 = max(search, int(ys.min()) - block)
         y1 = min(H - search, int(ys.max()) + block)
+        found = []
         count = 0
         for y in range(y0, y1 - block, step):
             for x in range(x0, x1 - block, step):
@@ -116,12 +132,18 @@ def _measure(paths, cams, rotations, W, H, search=32, block=64):
                     continue
                 cx = x + block // 2
                 cy = y + block // 2
-                matches.append((i, j, cx, cy, cx + dx, cy + dy))
+                found.append((i, j, cx, cy, cx + dx, cy + dy))
                 count += 1
                 if count >= 40:
                     break
             if count >= 40:
                 break
+        return found
+
+    matches = []
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        for res in ex.map(_pair, pairs):
+            matches.extend(res)
 
     if not matches:
         return None

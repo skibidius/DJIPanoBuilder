@@ -18,6 +18,7 @@ out/
 
 # PyInstaller / сборка
 build/
+*.egg-info/
 dist/
 *.spec
 

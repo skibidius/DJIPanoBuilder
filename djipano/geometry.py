@@ -152,22 +152,25 @@ def _sample_bilinear(img, u, v, valid):
     H, W = img.shape[:2]
     u = np.clip(u, 0, W - 1)
     v = np.clip(v, 0, H - 1)
-    u0 = np.floor(u).astype(np.int32)
-    v0 = np.floor(v).astype(np.int32)
+    u0 = u.astype(np.int32)
+    v0 = v.astype(np.int32)
     u1 = np.minimum(u0 + 1, W - 1)
     v1 = np.minimum(v0 + 1, H - 1)
     du = (u - u0)[..., None]
     dv = (v - v0)[..., None]
 
-    ia = img[v0, u0].astype(np.float32)
-    ib = img[v0, u1].astype(np.float32)
-    ic = img[v1, u0].astype(np.float32)
-    id_ = img[v1, u1].astype(np.float32)
-
-    out = (ia * (1 - du) * (1 - dv) + ib * du * (1 - dv)
-           + ic * (1 - du) * dv + id_ * du * dv)
+    # Flattened gather is ~2x faster than 2-D advanced indexing.
+    flat = img.reshape(-1, img.shape[2])
+    i00 = v0 * W + u0
+    i01 = v0 * W + u1
+    i10 = v1 * W + u0
+    i11 = v1 * W + u1
+    out = (np.take(flat, i00, axis=0) * (1 - du) * (1 - dv)
+           + np.take(flat, i01, axis=0) * du * (1 - dv)
+           + np.take(flat, i10, axis=0) * (1 - du) * dv
+           + np.take(flat, i11, axis=0) * du * dv)
     out[~valid] = 0.0
-    return out
+    return out.astype(np.float32, copy=False)
 
 
 def warp_to_equirect(img, cam, R, out_w, out_h, offset_deg=(0.0, 0.0),
@@ -212,9 +215,10 @@ def warp_to_equirect(img, cam, R, out_w, out_h, offset_deg=(0.0, 0.0),
         d_cam = d_world @ R  # R^T, так как R ортонормирована
         z = d_cam[..., 2]
         front = z > 1e-6
+        zs = np.where(front, z, 1.0)
 
-        u = cam.cx + cam.fx * d_cam[..., 0] / z
-        v = cam.cy + cam.fy * d_cam[..., 1] / z
+        u = cam.cx + cam.fx * d_cam[..., 0] / zs
+        v = cam.cy + cam.fy * d_cam[..., 1] / zs
 
         valid = front & (u >= 0) & (u <= cam.width - 1) & (v >= 0) & (v <= cam.height - 1)
 

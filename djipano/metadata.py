@@ -172,3 +172,34 @@ def build_output_exif(paths):
     except Exception:
         pass
     return ex
+
+
+def load_image(path, cam, out_w, mode="RGB", min_width=None):
+    """Open a frame, decoding the JPEG at the smallest sufficient resolution.
+
+    The source frames are heavily oversampled compared to the equirect
+    output, so ``Image.draft`` lets libjpeg decode at 1/2, 1/4 or 1/8 scale.
+    This is a large speed-up and does not visibly change the result.
+
+    Returns ``(array, camera)`` where ``camera`` is scaled to the decoded
+    resolution, so callers can use it directly for projection.
+
+    ``min_width`` forces a higher decode resolution when the caller needs
+    texture (e.g. the pose-refinement matcher).
+    """
+    im = Image.open(path)
+    try:
+        fov = 2.0 * math.atan(cam.width / (2.0 * cam.fx))
+        target_w = max(1, int(out_w * fov / (2.0 * math.pi)))
+        if min_width:
+            target_w = max(target_w, int(min_width))
+        target_h = max(1, int(target_w * cam.height / cam.width))
+        im.draft(mode, (target_w, target_h))
+    except Exception:
+        pass
+    im = im.convert(mode)
+    arr = np.asarray(im, dtype=np.float32)
+    scale = arr.shape[1] / float(cam.width)
+    if abs(scale - 1.0) > 1e-6:
+        cam = Camera(arr.shape[1], arr.shape[0], cam.fx * scale, cam.fy * scale)
+    return arr, cam

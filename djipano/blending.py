@@ -7,7 +7,7 @@ import numpy as np
 from PIL import Image
 
 from .geometry import warp_to_equirect
-from .metadata import Camera
+from .metadata import Camera, load_image
 
 
 # ---------------------------------------------------------------------------
@@ -21,25 +21,48 @@ def _downsample2(img):
     if H2 < 1 or W2 < 1:
         return img.copy()
     crop = img[:H2 * 2, :W2 * 2]
-    if img.ndim == 2:
-        return crop.reshape(H2, 2, W2, 2).mean(axis=(1, 3))
-    return crop.reshape(H2, 2, W2, 2, img.shape[2]).mean(axis=(1, 3))
+    # Slicing is ~4x faster than reshape+mean and gives the same box average.
+    return (crop[0::2, 0::2] + crop[1::2, 0::2]
+            + crop[0::2, 1::2] + crop[1::2, 1::2]) * 0.25
 
 
 def _upsample2(img, target_h, target_w):
-    """Билинейно увеличивает вдвое (до заданного размера)."""
-    if img.ndim == 2:
-        return np.asarray(
-            Image.fromarray(img.astype(np.float32), mode="F").resize(
-                (target_w, target_h), Image.BILINEAR)
-        )
-    out = np.empty((target_h, target_w, img.shape[2]), dtype=np.float32)
-    for c in range(img.shape[2]):
-        out[..., c] = np.asarray(
-            Image.fromarray(img[..., c].astype(np.float32), mode="F").resize(
-                (target_w, target_h), Image.BILINEAR)
-        )
-    return out
+    """Быстрое билинейное увеличение вдвое (numpy)."""
+    h, w = img.shape[:2]
+    if h < 2 or w < 2:
+        if img.ndim == 2:
+            return np.asarray(
+                Image.fromarray(img.astype(np.float32), mode="F").resize(
+                    (target_w, target_h), Image.BILINEAR))
+        out = np.empty((target_h, target_w, img.shape[2]), dtype=np.float32)
+        for c in range(img.shape[2]):
+            out[..., c] = np.asarray(
+                Image.fromarray(img[..., c].astype(np.float32), mode="F").resize(
+                    (target_w, target_h), Image.BILINEAR))
+        return out
+
+    # horizontal 2x (edge-replicated, matching pixel-centre bilinear)
+    tmp = np.empty((h, 2 * w) + img.shape[2:], dtype=np.float32)
+    tmp[:, 0] = img[:, 0]
+    tmp[:, 1:-1:2] = 0.75 * img[:, :-1] + 0.25 * img[:, 1:]
+    tmp[:, 2:-1:2] = 0.25 * img[:, :-1] + 0.75 * img[:, 1:]
+    tmp[:, -1] = img[:, -1]
+
+    # vertical 2x
+    out = np.empty((2 * h, 2 * w) + img.shape[2:], dtype=np.float32)
+    out[0] = tmp[0]
+    out[1:-1:2] = 0.75 * tmp[:-1] + 0.25 * tmp[1:]
+    out[2:-1:2] = 0.25 * tmp[:-1] + 0.75 * tmp[1:]
+    out[-1] = tmp[-1]
+
+    if out.shape[0] < target_h or out.shape[1] < target_w:
+        pad_h = max(0, target_h - out.shape[0])
+        pad_w = max(0, target_w - out.shape[1])
+        if out.ndim == 2:
+            out = np.pad(out, ((0, pad_h), (0, pad_w)), mode="edge")
+        else:
+            out = np.pad(out, ((0, pad_h), (0, pad_w), (0, 0)), mode="edge")
+    return out[:target_h, :target_w]
 
 
 # ---------------------------------------------------------------------------
@@ -63,9 +86,11 @@ def estimate_gains(paths, cams, rotations, out_w=256, out_h=128, mode="auto"):
     # Рендерим уменьшенные версии и запоминаем медианную яркость перекрытий.
     layers = []
     for i, path in enumerate(paths):
+        small_w = max(1, cams[i].width // 8)
+        small_h = max(1, cams[i].height // 8)
         with Image.open(path) as im:
-            im = im.convert("RGB")
-            small = im.resize((cams[i].width // 8, cams[i].height // 8))
+            im.draft("RGB", (small_w, small_h))
+            small = im.convert("RGB").resize((small_w, small_h))
         arr = np.asarray(small, dtype=np.float32)
         cam_small = Camera(small.width, small.height,
                            cams[i].fx / 8.0, cams[i].fy / 8.0)
@@ -117,6 +142,23 @@ def estimate_gains(paths, cams, rotations, out_w=256, out_h=128, mode="auto"):
 # Заполнение «дыры» в зените
 # ---------------------------------------------------------------------------
 
+def _down_to(a, tw, th):
+    """Fast area downsample to (th, tw) via repeated 2x box + PIL BOX."""
+    while a.shape[0] >= th * 2 and a.shape[1] >= tw * 2:
+        a = _downsample2(a)
+    if a.shape[0] == th and a.shape[1] == tw:
+        return a
+    if a.ndim == 2:
+        return np.asarray(Image.fromarray(a.astype(np.float32), mode="F").resize(
+            (tw, th), Image.BOX))
+    out = np.empty((th, tw, a.shape[2]), dtype=np.float32)
+    for c in range(a.shape[2]):
+        out[..., c] = np.asarray(
+            Image.fromarray(a[..., c].astype(np.float32), mode="F").resize(
+                (tw, th), Image.BOX))
+    return out
+
+
 def fill_holes(equirect, weight, low_width=160, iters=8000, feather=0.04):
     """
     Аккуратно заполняет не покрытые снимками пиксели (зенит/надир).
@@ -139,10 +181,10 @@ def fill_holes(equirect, weight, low_width=160, iters=8000, feather=0.04):
             Image.fromarray(a2d.astype(np.float32), mode="F").resize(size, resample)
         )
 
-    den = resize_f32(weight, (lw, lh), Image.BOX)
+    den = _down_to(weight, lw, lh)
     low = np.zeros((lh, lw, C), dtype=np.float32)
     for c in range(C):
-        num = resize_f32(equirect[..., c] * weight, (lw, lh), Image.BOX)
+        num = _down_to(equirect[..., c] * weight, lw, lh)
         low[..., c] = num / np.maximum(den, 1e-6)
 
     hole_low = den < 1e-4
@@ -206,10 +248,10 @@ def _render_linear(paths, cams, rotations, gains, offsets, out_w, out_h,
     for i, p in enumerate(paths):
         if progress_cb:
             progress_cb(i, n, os.path.basename(p))
-        with Image.open(p) as im:
-            arr = np.asarray(im.convert("RGB"), dtype=np.float32) * gains[i]
+        arr, cam_i = load_image(p, cams[i], out_w, "RGB")
+        arr *= gains[i]
         warped, weight = warp_to_equirect(
-            arr, cams[i], rotations[i], out_w, out_h,
+            arr, cam_i, rotations[i], out_w, out_h,
             offset_deg=offsets[i], weight_power=weight_power)
         acc += warped
         acc_w += weight
@@ -264,10 +306,10 @@ def _render_multiband(paths, cams, rotations, gains, offsets, out_w, out_h,
     for i, p in enumerate(paths):
         if progress_cb:
             progress_cb(i, n, os.path.basename(p))
-        with Image.open(p) as im:
-            arr = np.asarray(im.convert("RGB"), dtype=np.float32) * gains[i]
+        arr, cam_i = load_image(p, cams[i], out_w, "RGB")
+        arr *= gains[i]
         warped, weight = warp_to_equirect(
-            arr, cams[i], rotations[i], out_w, out_h,
+            arr, cam_i, rotations[i], out_w, out_h,
             offset_deg=offsets[i], weight_power=weight_power, weighted=False)
         del arr
 
@@ -278,8 +320,8 @@ def _render_multiband(paths, cams, rotations, gains, offsets, out_w, out_h,
             best_i, aw, ah = assignment
             m_half = (best_i == i).astype(np.float32)
             m_full = np.asarray(
-                Image.fromarray(m_half, mode="F").resize((out_w, out_h), Image.BILINEAR)
-            )
+                Image.fromarray(m_half, mode="F").resize(
+                    (out_w, out_h), Image.BILINEAR))
             weight = m_full * (weight > 0)
             del m_half, m_full
 

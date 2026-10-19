@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dji-pano-builder"
+version = "1.2.0"
+description = "Stitch DJI drone spherical panoramas into standard 2:1 equirectangular images"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "skibidius" }]
+keywords = ["dji", "drone", "panorama", "equirectangular", "stitching", "photosphere"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Multimedia :: Graphics :: Graphics Conversion",
+]
+dependencies = [
+    "numpy>=1.22",
+    "Pillow>=9.0",
+    "scipy>=1.10",
+]
+
+[project.optional-dependencies]
+gui = []
+
+[project.scripts]
+dji-pano = "djipano.cli:main"
+dji-pano-gui = "djipano.gui:main"
+
+[project.urls]
+Homepage = "https://github.com/skibidius/DJIPanoBuilder"
+Repository = "https://github.com/skibidius/DJIPanoBuilder"
+Releases = "https://github.com/skibidius/DJIPanoBuilder/releases"
+
+[tool.setuptools]
+packages = ["djipano"]

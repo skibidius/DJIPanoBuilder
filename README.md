@@ -31,6 +31,8 @@ the native GUI and the command-line tool — so there is only one place to chang
 * Accurate stitching from XMP gimbal angles (no feature matching).
 * **Pose refinement** — per-frame rotation corrections estimated from the
   overlaps, so the horizon and seams line up.
+* **Fast** — JPEG draft decoding, threaded reprojection/matching and optimised
+  resampling (no visible quality loss).
 * Standard 2:1 equirectangular output + GPano XMP + GPS/EXIF.
 * **Multiband (Laplacian pyramid) blending** — smooth seams, sharp detail.
 * **Seam-based assignment** — each pixel comes from one frame, which removes
@@ -80,6 +82,36 @@ python3 dji_pano.py PANORAMA/006_0004 -o 006_0004_pano.jpg --preview
 python3 dji_pano.py PANORAMA --out-dir output -w 12000 --preview
 ```
 
+### Python library
+
+The package can be imported from your own scripts:
+
+```python
+from djipano import stitch
+
+# one set -> StitchResult(output, preview, frames, width, height)
+result = stitch("PANORAMA/006_0004", output="pano.jpg", width=12000)
+print(result.output, result.width, result.height)
+
+# a whole root folder -> list[StitchResult]
+for r in stitch("PANORAMA", out_dir="output", width=12000, preview=True):
+    print(r.output)
+
+# an explicit list of frames
+import glob
+stitch(sorted(glob.glob("frames/*.JPG")), output="pano.jpg")
+```
+
+Install it into your environment:
+
+```bash
+pip install .
+```
+
+Lower-level building blocks (`build_panorama`, `find_pano_folders`,
+`list_pano_files`, `Camera`, `rotation_matrix`, `warp_to_equirect`,
+`refine_poses`) are exported from `djipano` too.
+
 ### Options
 
 | Option | Description | Default |
@@ -117,10 +149,12 @@ python3 dji_pano.py PANORAMA --out-dir output -w 12000 --preview
 
 ```
 djipano/            shared core package (imported by both entry points)
-├── metadata.py     XMP/EXIF/GPano, Camera
+├── metadata.py     XMP/EXIF/GPano, Camera, draft image loading
 ├── geometry.py     rotations, equirectangular reprojection
 ├── blending.py     exposure, multiband, seams, hole filling
+├── align.py        pose refinement (bundle adjustment)
 ├── pipeline.py     build_panorama + folder discovery
+├── api.py          high-level stitch() Python API
 ├── progress.py     terminal progress bar / spinner
 ├── cli.py          command-line interface
 └── gui.py          native Tkinter GUI
@@ -149,8 +183,11 @@ stitches, but a soft blurred patch appears where the data is absent.
 
 ### Performance & memory
 
-* Default `-w 12000` with multiband blending uses roughly **8 GB of RAM** and
-  takes **~2–3 minutes** per panorama on Apple Silicon.
+* `-w 4000` with pose refinement + multiband: **~15 s** per panorama on Apple
+  Silicon.
+* Default `-w 12000`: **~1.5 minutes (~86 s)** and **~8 GB of RAM**.
+* Speed-ups: JPEG `draft` decoding, threaded reprojection/matching, fast
+  bilinear resampling and box downsampling.
 * If memory is tight, use `-w 8000` and/or `--blend linear`.
 * Batch mode processes folders sequentially, so peak memory does not add up.
 
@@ -186,6 +223,8 @@ DJI сохраняет панораму как набор отдельных к�
 * Точная сборка по углам подвеса из XMP (без feature matching).
 * **Уточнение позы** — поправки поворота каждого кадра по перекрытиям, чтобы
   горизонт и швы сходились ровно.
+* **Быстро** — draft-декодирование JPEG, потоковая репроекция/матчинг и
+  оптимизированный ресемплинг (без видимой потери качества).
 * Стандартный выход 2:1 equirectangular + XMP GPano + GPS/EXIF.
 * **Многополосное (Laplacian pyramid) смешивание** — гладкие швы и резкие детали.
 * **Шовное назначение пикселей** — каждый пиксель берётся из одного кадра,
@@ -234,6 +273,36 @@ python3 dji_pano.py PANORAMA/006_0004 -o 006_0004_pano.jpg --preview
 python3 dji_pano.py PANORAMA --out-dir output -w 12000 --preview
 ```
 
+### Python-библиотека
+
+Пакет можно использовать из своих скриптов:
+
+```python
+from djipano import stitch
+
+# один набор -> StitchResult(output, preview, frames, width, height)
+result = stitch("PANORAMA/006_0004", output="pano.jpg", width=12000)
+print(result.output, result.width, result.height)
+
+# вся корневая папка -> list[StitchResult]
+for r in stitch("PANORAMA", out_dir="output", width=12000, preview=True):
+    print(r.output)
+
+# явный список кадров
+import glob
+stitch(sorted(glob.glob("frames/*.JPG")), output="pano.jpg")
+```
+
+Установка в окружение:
+
+```bash
+pip install .
+```
+
+Низкоуровневые функции (`build_panorama`, `find_pano_folders`,
+`list_pano_files`, `Camera`, `rotation_matrix`, `warp_to_equirect`,
+`refine_poses`) тоже доступны из `djipano`.
+
 ### Опции
 
 | Опция | Описание | По умолчанию |
@@ -270,10 +339,12 @@ python3 dji_pano.py PANORAMA --out-dir output -w 12000 --preview
 
 ```
 djipano/            общий пакет с логикой
-├── metadata.py     XMP/EXIF/GPano, камера
+├── metadata.py     XMP/EXIF/GPano, камера, draft-загрузка кадров
 ├── geometry.py     повороты, equirect-проекция
 ├── blending.py     экспозиция, многополосное смешивание, швы, зенит
+├── align.py        уточнение позы (bundle adjustment)
 ├── pipeline.py     build_panorama + поиск папок
+├── api.py          высокоуровневый Python API stitch()
 ├── progress.py     прогресс-бар / спиннер
 ├── cli.py          командная строка
 └── gui.py          нативный GUI на Tkinter
@@ -301,8 +372,11 @@ dji_pano_gui.py     точка входа GUI
 
 ### Производительность и память
 
-* `-w 12000` с многополосным смешиванием: ~**8 ГБ ОЗУ**, ~**2–3 минуты** на
+* `-w 4000` с уточнением позы и многополосным смешиванием: **~15 с** на
   панораму (Apple Silicon).
+* По умолчанию `-w 12000`: **~1.5 минуты (~86 с)** и **~8 ГБ ОЗУ**.
+* Ускорения: draft-декодирование JPEG, потоковая репроекция/матчинг, быстрый
+  билинейный ресемплинг и box-downsampling.
 * Если памяти мало — `-w 8000` и/или `--blend linear`.
 * Пакетный режим обрабатывает папки последовательно.
 
