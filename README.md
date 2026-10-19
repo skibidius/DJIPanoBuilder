@@ -1,9 +1,10 @@
 # DJI Pano Builder
 
 A quality stitcher for DJI drone spherical panoramas (Sphere Panorama / 360 mode).
+Turn a folder of `PANO*.JPG` frames into a standard **2:1 equirectangular**
+panorama with Google Photo Sphere (GPano) metadata.
 
-Turn a folder of `PANO*.JPG` frames into a standard **2:1 equirectangular** panorama
-with Google Photo Sphere (GPano) metadata.
+![DJI Pano Builder GUI](assets/screenshot.png)
 
 ---
 
@@ -16,40 +17,54 @@ PANO0025.JPG` (usually 3 rings × 8 frames + one nadir). Each frame's XMP
 metadata already contains the **exact gimbal orientation**:
 `GimbalYawDegree`, `GimbalPitchDegree`, `GimbalRollDegree`.
 
-The script uses that orientation directly: every frame is reprojected onto a
-sphere instead of being matched by features. This gives an even, globally
+The stitcher uses that orientation directly: every frame is reprojected onto a
+sphere instead of being matched by features. The result is an even, globally
 consistent panorama without drift or geometry doubling.
 
-Output: a standard **2:1 equirectangular JPEG** with GPano XMP metadata and
-GPS/EXIF from the source, understood by 360° viewers (Google Photos, Facebook,
-Ricoh/Insta360 players, etc.).
+The stitching logic lives in **one shared package** (`djipano/`), used by both
+the native GUI and the command-line tool — so there is only one place to change.
 
 ### Features
 
+* Native **Tkinter GUI** with folder picker, live progress bar, ETA, log and
+  panorama / tiny-planet preview.
 * Accurate stitching from XMP gimbal angles (no feature matching).
 * Standard 2:1 equirectangular output + GPano XMP + GPS/EXIF.
 * **Multiband (Laplacian pyramid) blending** — smooth seams, sharp detail.
-* Adjustable **seam sharpness** (`--sharpness`) to reduce ghosting/doubling
-  in overlapping areas.
-* Smooth zenith fill via colour diffusion (Laplace equation) — no dark seam.
+* **Seam-based assignment** — each pixel comes from one frame, which removes
+  ghosting in overlapping areas.
+* Adjustable seam sharpness (`--sharpness`).
+* Smooth zenith fill via colour diffusion (Laplace equation).
 * Optional exposure equalisation over overlaps (`--exposure auto`).
-* "Tiny planet" preview (`--preview`).
+* "Tiny planet" preview.
 * Batch mode: point it at a root folder and every set is processed.
-* Pretty English CLI with a **progress bar, ETA and spinners**.
-* Tolerates missing frames: a missing shot does not break the stitch (a soft
-  patch appears where data is absent).
+* Pretty English CLI with progress bar, ETA and spinners.
+* Tolerates missing frames: a missing shot does not break the stitch.
 
 ### Requirements
 
 * Python 3.9+
 * `numpy`
 * `Pillow`
+* Tkinter **only for the GUI** (on macOS/Homebrew: `brew install python-tk@3.14`;
+  Debian/Ubuntu: `sudo apt install python3-tk`; Windows: official python.org
+  installer already includes it)
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### Usage
+### GUI
+
+```bash
+python3 dji_pano_gui.py
+```
+
+Pick a folder (or a root folder with several `PANO*` sets), adjust the options
+and press **Build panorama**. The progress bar, log and a preview of the result
+appear in the same window.
+
+### CLI
 
 ```bash
 # a single folder
@@ -69,25 +84,49 @@ python3 dji_pano.py PANORAMA --out-dir output -w 12000 --preview
 | `-o, --output` | output JPEG path (single folder) | — |
 | `-w, --width` | panorama width in pixels (height = width / 2) | `12000` |
 | `--preview` | also save a "tiny planet" preview | off |
-| `--no-fill` | do not fill the zenith gap (leave it black) | off |
-| `--exposure {none,auto}` | brightness correction: `none` or overlap-based `auto` | `none` |
+| `--no-fill` | do not fill the zenith gap | off |
+| `--exposure {none,auto}` | brightness correction | `none` |
 | `--blend {multiband,linear}` | blending mode | `multiband` |
-| `--sharpness N` | seam sharpness; higher = narrower transition, less ghosting | `3` |
+| `--sharpness N` | seam sharpness (higher = narrower) | `3` |
+| `--no-seam` | disable seam-based assignment | off |
 | `--out-dir DIR` | output folder for batch mode | `.` |
 | `--no-color` | disable coloured output | off |
 | `-q, --quiet` | only print errors | off |
 
 ### How it works
 
-1. Read `GimbalYaw/Pitch/Roll` (XMP) and focal length (EXIF) from each
-   `PANO*.JPG`. Compute intrinsics `fx, fy` from the camera sensor size.
+1. Read `GimbalYaw/Pitch/Roll` (XMP) and focal length (EXIF) from each frame.
+   Compute intrinsics `fx, fy` from the camera sensor size.
 2. Build a camera-to-world rotation matrix (ENU) per frame.
-3. Fill the output equirect map by inverse mapping: for each sphere pixel find
-   the ray direction, transform it into the frame, and bilinearly sample.
-4. Blend frames with **multiband (Laplacian pyramid)** blending and weights that
-   fade toward image edges. `--sharpness` controls how narrow the seam is.
+3. Fill the equirect map by inverse mapping: for each sphere pixel find the ray
+   direction, transform it into the frame and bilinearly sample.
+4. Find a seam assignment (which frame owns each pixel) and blend with
+   multiband Laplacian pyramids: fine detail from one frame, smooth low
+   frequencies across the seam.
 5. Fill uncovered areas (zenith) by colour diffusion.
 6. Save a 2:1 JPEG with GPano XMP and source GPS/EXIF.
+
+### Project structure
+
+```
+djipano/            shared core package (imported by both entry points)
+├── metadata.py     XMP/EXIF/GPano, Camera
+├── geometry.py     rotations, equirectangular reprojection
+├── blending.py     exposure, multiband, seams, hole filling
+├── pipeline.py     build_panorama + folder discovery
+├── progress.py     terminal progress bar / spinner
+├── cli.py          command-line interface
+└── gui.py          native Tkinter GUI
+dji_pano.py         CLI entry point
+dji_pano_gui.py     GUI entry point
+```
+
+### Automated build (GitHub Actions)
+
+`.github/workflows/build.yml` checks imports on Linux/macOS/Windows and builds
+standalone executables with PyInstaller (`dji-pano-builder` and
+`dji-pano-builder-gui`). On a `v*` tag the binaries are attached to the GitHub
+release automatically.
 
 ### About the DJI Sphere format
 
@@ -126,41 +165,52 @@ DJI сохраняет панораму как набор отдельных к�
 `GimbalRollDegree`.
 
 Скрипт использует эту ориентацию напрямую: каждый кадр перепроецируется на
-сферу, а не «склеивается» по общим точкам. Благодаря этому панорама получается
-ровной, без накопления ошибки и «двоения» геометрии.
+сферу, а не «склеивается» по общим точкам. Панорама получается ровной, без
+накопления ошибки и «двоения» геометрии.
 
-Результат — **стандартная равнопромежуточная (equirectangular) панорама 2:1**
-с XMP-метаданными Google Photo Sphere (GPano) и GPS/EXIF из исходника.
-Её понимают просмотрщики 360° (Google Photos, Facebook, плееры Ricoh/Insta360
-и т.д.).
+Вся логика сборки живёт в **одном общем пакете** (`djipano/`), который
+используют и GUI, и командная строка — менять код нужно в одном месте.
 
 ### Возможности
 
+* Нативный **GUI на Tkinter**: выбор папки, прогресс-бар, ETA, лог и превью
+  панорамы / «маленькой планеты».
 * Точная сборка по углам подвеса из XMP (без feature matching).
 * Стандартный выход 2:1 equirectangular + XMP GPano + GPS/EXIF.
 * **Многополосное (Laplacian pyramid) смешивание** — гладкие швы и резкие детали.
-* Регулируемая **резкость шва** (`--sharpness`) — уменьшает «двоение» в зонах
-  перекрытия кадров.
-* Аккуратное заполнение «дыры» в зените диффузией цвета (уравнение Лапласа) —
-  без тёмной каймы и полос.
+* **Шовное назначение пикселей** — каждый пиксель берётся из одного кадра,
+  что убирает гостинг в зонах перекрытия.
+* Регулируемая резкость шва (`--sharpness`).
+* Аккуратное заполнение зенита диффузией цвета.
 * Опциональное выравнивание яркости по перекрытиям (`--exposure auto`).
-* Превью «маленькая планета» (`--preview`).
-* Пакетная обработка: укажите корневую папку — обработаются все наборы.
-* Красивый английский интерфейс с **прогресс-баром, ETA и спиннерами**.
-* Устойчивость к пропущенным кадрам: отсутствие одного снимка не ломает
-  сборку (на этом месте останется мягкая «заплатка»).
+* Превью «маленькая планета».
+* Пакетная обработка всех подпапок.
+* Английский CLI с прогресс-баром, ETA и спиннерами.
+* Устойчивость к пропущенным кадрам.
 
 ### Требования
 
 * Python 3.9+
 * `numpy`
 * `Pillow`
+* Tkinter **только для GUI** (macOS/Homebrew: `brew install python-tk@3.14`;
+  Debian/Ubuntu: `sudo apt install python3-tk`; Windows: официальный установщик
+  python.org уже содержит Tk)
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### Использование
+### GUI
+
+```bash
+python3 dji_pano_gui.py
+```
+
+Выберите папку (или корневую папку с несколькими наборами `PANO*`), настройте
+опции и нажмите **Build panorama**. Прогресс, лог и превью появятся в том же окне.
+
+### CLI
 
 ```bash
 # одна папка с кадрами
@@ -177,49 +227,67 @@ python3 dji_pano.py PANORAMA --out-dir output -w 12000 --preview
 
 | Опция | Описание | По умолчанию |
 |-------|----------|--------------|
-| `-o, --output` | путь к выходному JPEG (для одной папки) | — |
+| `-o, --output` | путь к выходному JPEG | — |
 | `-w, --width` | ширина панорамы (высота = ширина / 2) | `12000` |
 | `--preview` | сохранить превью «маленькая планета» | выкл. |
 | `--no-fill` | не заполнять дыру в зените | выкл. |
-| `--exposure {none,auto}` | коррекция яркости: `none` или `auto` по перекрытиям | `none` |
+| `--exposure {none,auto}` | коррекция яркости | `none` |
 | `--blend {multiband,linear}` | режим смешивания | `multiband` |
-| `--sharpness N` | резкость шва; больше = уже переход, меньше «двоения» | `3` |
-| `--out-dir DIR` | папка результатов при пакетной обработке | `.` |
+| `--sharpness N` | резкость шва | `3` |
+| `--no-seam` | отключить шовное назначение | выкл. |
+| `--out-dir DIR` | папка результатов | `.` |
 | `--no-color` | отключить цветной вывод | выкл. |
-| `-q, --quiet` | выводить только ошибки | выкл. |
+| `-q, --quiet` | только ошибки | выкл. |
 
 ### Как это работает
 
-1. Из каждого `PANO*.JPG` читаются `GimbalYaw/Pitch/Roll` (XMP) и фокусное
-   расстояние (EXIF). По размеру сенсора вычисляются параметры `fx, fy`.
+1. Из каждого кадра читаются `GimbalYaw/Pitch/Roll` (XMP) и фокусное
+   расстояние (EXIF). По размеру сенсора вычисляются `fx, fy`.
 2. Для каждого кадра строится матрица поворота «камера → мир» (ENU).
-3. Выходная equirect-карта заполняется обратным отображением: для каждого
-   пикселя сферы находится направление луча, оно переводится в координаты
-   кадра, и выполняется билинейная выборка.
-4. Кадры смешиваются **многополосным (Laplacian pyramid)** способом с весами,
-   затухающими к краям. `--sharpness` управляет шириной шва.
+3. Выходная equirect-карта заполняется обратным отображением.
+4. Строится карта «владения» пикселей (какой кадр главный) и выполняется
+   многополосное смешивание: мелкие детали из одного кадра, низкие частоты
+   плавно смешиваются через шов.
 5. Непокрытые области (зенит) заполняются диффузией цвета.
 6. Результат сохраняется как 2:1 JPEG с XMP GPano и GPS/EXIF.
+
+### Структура проекта
+
+```
+djipano/            общий пакет с логикой
+├── metadata.py     XMP/EXIF/GPano, камера
+├── geometry.py     повороты, equirect-проекция
+├── blending.py     экспозиция, многополосное смешивание, швы, зенит
+├── pipeline.py     build_panorama + поиск папок
+├── progress.py     прогресс-бар / спиннер
+├── cli.py          командная строка
+└── gui.py          нативный GUI на Tkinter
+dji_pano.py         точка входа CLI
+dji_pano_gui.py     точка входа GUI
+```
+
+### Автоматическая сборка (GitHub Actions)
+
+`.github/workflows/build.yml` проверяет импорты на Linux/macOS/Windows и
+собирает standalone-бинарники через PyInstaller (`dji-pano-builder` и
+`dji-pano-builder-gui`). При пуше тега `v*` бинарники автоматически
+прикрепляются к GitHub Release.
 
 ### Про формат DJI Sphere
 
 Стандартный набор DJI — **25 кадров**: 3 кольца по 8 кадров (pitch ≈ +20°,
-−17°, −55°) и один надир (pitch ≈ −90°). Зенит (pitch > +48°) при этом
-не снимается, поэтому в исходных данных его физически нет — скрипт
-достраивает его плавным заполнением. Если небо в кадре пересвечено
-(белое), заплатка будет незаметной.
+−17°, −55°) и один надир (pitch ≈ −90°). Зенит (pitch > +48°) не снимается,
+поэтому его физически нет — скрипт достраивает его плавным заполнением.
 
-Если в наборе не хватает одного кадра (например, 24 файла вместо 25),
-панорама всё равно соберётся, но в месте пропуска будет мягкое размытое
-пятно — данных там нет.
+Если в наборе не хватает одного кадра, панорама всё равно соберётся, но в
+месте пропуска останется мягкое размытое пятно.
 
 ### Производительность и память
 
-* По умолчанию `-w 12000` с многополосным смешиванием использует примерно
-  **8 ГБ ОЗУ** и занимает **~2–3 минуты** на панораму (Apple Silicon).
-* Если памяти мало — используйте `-w 8000` и/или `--blend linear`.
-* Пакетный режим обрабатывает папки последовательно, поэтому пик памяти
-  не суммируется.
+* `-w 12000` с многополосным смешиванием: ~**8 ГБ ОЗУ**, ~**2–3 минуты** на
+  панораму (Apple Silicon).
+* Если памяти мало — `-w 8000` и/или `--blend linear`.
+* Пакетный режим обрабатывает папки последовательно.
 
 ### Лицензия
 
