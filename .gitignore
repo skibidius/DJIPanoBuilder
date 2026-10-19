@@ -1,0 +1,22 @@
+# Исходные данные и результаты не храним в репозитории
+# (в репозитории не должно быть примеров фото с дрона).
+
+# Пример данных / папки с кадрами панорам
+PANORAMA/
+PANO*/
+**/PANO*.JPG
+**/PANO*.jpg
+**/PANO*.jpeg
+
+# Результаты сборки
+*_pano.jpg
+*_pano.jpeg
+*_preview.jpg
+*_preview.jpeg
+output/
+out/
+
+# Python / системный мусор
+__pycache__/
+*.pyc
+.DS_Store
