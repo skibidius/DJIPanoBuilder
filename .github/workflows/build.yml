@@ -61,11 +61,33 @@ jobs:
         run: pyinstaller --noconfirm --clean --onefile --name dji-pano-builder dji_pano.py
       - name: Build GUI
         run: pyinstaller --noconfirm --clean --onefile --windowed --name dji-pano-builder-gui dji_pano_gui.py
+      - name: Collect release files with unique names
+        shell: bash
+        run: |
+          mkdir -p release
+          case "${{ runner.os }}" in
+            Linux)   suffix="linux" ;;
+            macOS)   suffix="macos" ;;
+            Windows) suffix="windows" ;;
+          esac
+          if [ -f dist/dji-pano-builder.exe ]; then
+            cp dist/dji-pano-builder.exe "release/dji-pano-builder-${suffix}.exe"
+          elif [ -f dist/dji-pano-builder ]; then
+            cp dist/dji-pano-builder "release/dji-pano-builder-${suffix}"
+          fi
+          if [ -d dist/dji-pano-builder-gui.app ]; then
+            (cd dist && zip -qr "../release/dji-pano-builder-gui-${suffix}.zip" dji-pano-builder-gui.app)
+          elif [ -f dist/dji-pano-builder-gui.exe ]; then
+            cp dist/dji-pano-builder-gui.exe "release/dji-pano-builder-gui-${suffix}.exe"
+          elif [ -f dist/dji-pano-builder-gui ]; then
+            cp dist/dji-pano-builder-gui "release/dji-pano-builder-gui-${suffix}"
+          fi
+          ls -lh release
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: dji-pano-builder-${{ matrix.os }}
-          path: dist/*
+          path: release/*
           if-no-files-found: warn
 
   release:
