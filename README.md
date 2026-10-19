@@ -100,6 +100,13 @@ patch is invisible.
 If a frame is missing (e.g. 24 files instead of 25), the panorama still
 stitches, but a soft blurred patch appears where the data is absent.
 
+### Performance & memory
+
+* Default `-w 12000` with multiband blending uses roughly **8 GB of RAM** and
+  takes **~2–3 minutes** per panorama on Apple Silicon.
+* If memory is tight, use `-w 8000` and/or `--blend linear`.
+* Batch mode processes folders sequentially, so peak memory does not add up.
+
 ### License
 
 MIT. See [LICENSE](LICENSE).
@@ -205,6 +212,14 @@ python3 dji_pano.py PANORAMA --out-dir output -w 12000 --preview
 Если в наборе не хватает одного кадра (например, 24 файла вместо 25),
 панорама всё равно соберётся, но в месте пропуска будет мягкое размытое
 пятно — данных там нет.
+
+### Производительность и память
+
+* По умолчанию `-w 12000` с многополосным смешиванием использует примерно
+  **8 ГБ ОЗУ** и занимает **~2–3 минуты** на панораму (Apple Silicon).
+* Если памяти мало — используйте `-w 8000` и/или `--blend linear`.
+* Пакетный режим обрабатывает папки последовательно, поэтому пик памяти
+  не суммируется.
 
 ### Лицензия
 
